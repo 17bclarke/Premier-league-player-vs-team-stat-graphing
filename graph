@@ -34,7 +34,7 @@ class GraphApp(App):
         # Dropdown to select graph
         self.spinner = Spinner(
             text="Select Graph",
-            values=("xG vs Starts", "xG vs Minutes", "xG vs gw", "Goals vs Starts", "Goals vs Minutes", "Goals vs gw"),
+            values=("xG vs Starts", "xG vs Minutes", "xG vs gw","xG vs FPL cost", "Goals vs FPL cost", "Goals vs Starts", "Goals vs Minutes", "Goals vs gw"),
             size_hint=(None, None),
             size=(200, 44),
             pos_hint={"center_x": 0.5}
@@ -45,7 +45,6 @@ class GraphApp(App):
         # Image widget to display the current graph
         self.graph_image = Image(source="xg_vs_starts.png")
         layout.add_widget(self.graph_image)
-
         return layout
 
     def update_graph(self, spinner, text):
@@ -61,6 +60,10 @@ class GraphApp(App):
             if self.graph is not None:
                 plt.close(self.graph)
             self.plot("gw","expected_goals_conceded","expected_goals")
+        elif text == "xG vs FPL cost":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("now_cost","expected_goals_conceded","expected_goals")
         elif text == "Goals vs Starts":
             if self.graph is not None:
                 plt.close(self.graph)
@@ -69,17 +72,19 @@ class GraphApp(App):
             if self.graph is not None:
                 plt.close(self.graph)
             self.plot("gw","goals_conceded","goals_scored")
+        elif text == "Goals vs FPL cost":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("now_cost","goals_conceded","goals_scored")
         elif text == "Goals vs Minutes":
             if self.graph is not None:
                 plt.close(self.graph)
             self.plot("minutes","expected_goals_conceded","goals_scored")
-        else:
-            print(text)
         self.graph_image.reload()  # Refresh image
 
     def plot(self, num, goalc, goal):
         # ============================================================
-        # 1️⃣ BUILD LOOKUP: player_id → team_code
+        # BUILD LOOKUP: player_id → team_code
         # ============================================================
 
         player_to_team = {}
@@ -91,14 +96,14 @@ class GraphApp(App):
 
 
         # ============================================================
-        # 2️⃣ BUILD LOOKUP: team_code → team_name
+        # BUILD LOOKUP: team_code → team_name
         # ============================================================
 
         teamcode_to_name = {t["code"]: t["name"] for t in teams}
 
 
         # ============================================================
-        # 3️⃣ CALCULATE TEAM GOALS CONCEDED PER GAME (using gw)
+        # CALCULATE TEAM GOALS CONCEDED PER GAME (using gw)
         # ============================================================
 
         team_gw_total = {}
@@ -136,7 +141,7 @@ class GraphApp(App):
         team_conceded_sorted = sorted(team_conceded_scores, key=lambda x: x["gc90"])
 
         # ============================================================
-        # 4️⃣ PLAYER SHOOTING (using expected_goals as proxy for SOT)
+        # PLAYER SHOOTING (using expected_goals as proxy for SOT)
         # ============================================================
 
         player_sot = []
@@ -154,11 +159,10 @@ class GraphApp(App):
                 })
                 added_players.add(name)  # Mark as added
 
-
         top_players = sorted(player_sot, key=lambda x: x['sot_per_game'], reverse=False)[len(player_sot)-20:]
 
         # ============================================================
-        # 5️⃣ PLOTTING
+        # PLOTTING
         # ============================================================
 
         team_x   = list(range(len(team_conceded_sorted)))
@@ -166,7 +170,6 @@ class GraphApp(App):
         self.graph = plt.figure(figsize=(18, 10))
         ax1 = self.graph.gca()
         ax2 = ax1.twinx()
-
 
         # --- BAR PLOT: Team likelihood to concede ---
         ax1.bar(
