@@ -1,0 +1,225 @@
+import csv
+import urllib.request
+import matplotlib.pyplot as plt
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.image import Image
+from kivy.uix.spinner import Spinner
+from kivy.core.window import Window
+
+# --- Read CSV helper that supports both URLs and local paths ---
+def read_csv(path):
+    if path.startswith("http://") or path.startswith("https://"):
+        response = urllib.request.urlopen(path)
+        lines = [line.decode('utf-8') for line in response.readlines()]
+        return list(csv.DictReader(lines))
+    else:
+        with open(path, newline='', encoding='utf-8') as f:
+            return list(csv.DictReader(f))
+
+# --- RAW URLs ---
+playerstats_url = "https://raw.githubusercontent.com/olbauday/FPL-Elo-Insights/main/data/2025-2026/playerstats.csv"
+players_url     = "https://raw.githubusercontent.com/olbauday/FPL-Elo-Insights/main/data/2025-2026/players.csv"
+teams_url       = "https://raw.githubusercontent.com/olbauday/FPL-Elo-Insights/main/data/2025-2026/teams.csv"
+
+playerstats = read_csv(playerstats_url)
+players     = read_csv(players_url)
+teams       = read_csv(teams_url)
+
+class GraphApp(App):
+    def build(self):
+        self.graph = None
+        layout = BoxLayout(orientation="vertical", spacing=10, padding=10)
+        
+        # Dropdown to select graph
+        self.spinner = Spinner(
+            text="Select Graph",
+            values=("xG vs Starts", "xG vs Minutes", "xG vs gw", "Goals vs Starts", "Goals vs Minutes", "Goals vs gw"),
+            size_hint=(None, None),
+            size=(200, 44),
+            pos_hint={"center_x": 0.5}
+        )
+        self.spinner.bind(text=self.update_graph)
+        layout.add_widget(self.spinner)
+
+        # Image widget to display the current graph
+        self.graph_image = Image(source="xg_vs_starts.png")
+        layout.add_widget(self.graph_image)
+
+        return layout
+
+    def update_graph(self, spinner, text):
+        if text == "xG vs Starts":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("starts","expected_goals_conceded","expected_goals")
+        elif text == "xG vs Minutes":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("minutes","expected_goals_conceded","expected_goals")
+        elif text == "xG vs gw":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("gw","expected_goals_conceded","expected_goals")
+        elif text == "Goals vs Starts":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("starts","goals_conceded","goals_scored")
+        elif text == "Goals vs gw":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("gw","goals_conceded","goals_scored")
+        elif text == "Goals vs Minutes":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("minutes","expected_goals_conceded","goals_scored")
+        else:
+            print(text)
+        self.graph_image.reload()  # Refresh image
+
+    def plot(self, num, goalc, goal):
+        # ============================================================
+        # 1️⃣ BUILD LOOKUP: player_id → team_code
+        # ============================================================
+
+        player_to_team = {}
+
+        for p in players:
+            pid = p["player_id"]              # matches playerstats[id]
+            team_code = p["team_code"] # integer stored as string
+            player_to_team[pid] = team_code
+
+
+        # ============================================================
+        # 2️⃣ BUILD LOOKUP: team_code → team_name
+        # ============================================================
+
+        teamcode_to_name = {t["code"]: t["name"] for t in teams}
+
+
+        # ============================================================
+        # 3️⃣ CALCULATE TEAM GOALS CONCEDED PER GAME (using gw)
+        # ============================================================
+
+        team_gw_total = {}
+        team_goals_conceded = {}
+
+        for p in playerstats:
+            pid = p["id"]
+
+            # Ensure player ID exists in players.csv
+            if pid not in player_to_team:
+                continue
+
+            team_code = player_to_team[pid]
+            team_name = teamcode_to_name.get(team_code, "UNKNOWN")
+
+            gw = float(p.get(num, 0))
+            gc = float(p.get(goalc, 0))
+
+            team_gw_total[team_name] = team_gw_total.get(team_name, 0) + gw
+            team_goals_conceded[team_name] = team_goals_conceded.get(team_name, 0) + gc
+
+        team_conceded_scores = []
+        for team in team_goals_conceded:
+            total_gc = team_goals_conceded[team]
+            total_gw = team_gw_total.get(team, 0)
+
+            gc_per_game = total_gc / total_gw if total_gw > 0 else 0
+
+            team_conceded_scores.append({
+                "team": team,
+                "gc90": gc_per_game
+            })
+
+        # Sort ascending (lowest to highest conceded per game)
+        team_conceded_sorted = sorted(team_conceded_scores, key=lambda x: x["gc90"])
+
+        # ============================================================
+        # 4️⃣ PLAYER SHOOTING (using expected_goals as proxy for SOT)
+        # ============================================================
+
+        player_sot = []
+        added_players = set()  # Track duplicates by name
+
+        for p in playerstats:
+            name = p['web_name']
+            if name not in added_players:
+                xg = float(p.get(goal, 0))
+                starts = float(p.get(num, 0))
+                sot_pg = xg / starts if starts > 0 else 0
+                player_sot.append({
+                    "player": name,
+                    "sot_per_game": sot_pg
+                })
+                added_players.add(name)  # Mark as added
+
+
+        top_players = sorted(player_sot, key=lambda x: x['sot_per_game'], reverse=False)[len(player_sot)-20:]
+
+        # ============================================================
+        # 5️⃣ PLOTTING
+        # ============================================================
+
+        team_x   = list(range(len(team_conceded_sorted)))
+        player_x = list(range(len(top_players)))
+        self.graph = plt.figure(figsize=(18, 10))
+        ax1 = self.graph.gca()
+        ax2 = ax1.twinx()
+
+
+        # --- BAR PLOT: Team likelihood to concede ---
+        ax1.bar(
+            team_x,
+            [t["gc90"] for t in team_conceded_sorted],
+            color="tab:blue",
+            alpha=0.6,
+            label="Team Goals Conceded per 90"
+        )
+
+        ax1.set_ylabel("Goals Conceded per 90", fontsize=12)
+        ax1.set_xticks(team_x)
+        ax1.set_xticklabels(
+            [t["team"] for t in team_conceded_sorted],
+            rotation=45,
+            ha="right",
+            fontsize=9
+        )
+
+
+        # --- LINE PLOT: Top 20 players SOT/Proxy ---
+        ax2.plot(
+            player_x,
+            [p["sot_per_game"] for p in top_players],
+            marker="o",
+            linewidth=2,
+            color="tab:red",
+        )
+
+        for i, p in enumerate(top_players):
+            ax2.annotate(
+                p["player"],
+                (player_x[i], p["sot_per_game"]),
+                textcoords="offset points",
+                xytext=(0, 7),
+                ha='center',
+                fontsize=7,
+                rotation=30
+            )
+
+        ax2.set_ylabel("SOT per Game (expected goals proxy)", fontsize=12)
+
+        ax1.legend(loc="upper left")
+        ax2.legend(loc="upper right")
+
+        plt.title("Premier League: Team Conceding Likelihood vs Top 20 Attacking Players", fontsize=16)
+        plt.grid(True, linestyle="--", alpha=0.35)
+        plt.tight_layout()
+        plt.savefig("current_graph.png")
+        plt.close(self.graph)
+        self.graph_image.source = "current_graph.png"
+        self.graph_image.reload()
+
+
+if __name__ == "__main__":
+    GraphApp().run()
