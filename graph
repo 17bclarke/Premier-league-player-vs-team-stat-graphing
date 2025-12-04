@@ -5,6 +5,7 @@ from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.image import Image
 from kivy.uix.spinner import Spinner
+from kivy.uix.button import Button
 from kivy.core.window import Window
 
 # --- Read CSV helper that supports both URLs and local paths ---
@@ -30,15 +31,16 @@ class GraphApp(App):
     def build(self):
         self.graph = None
         layout = BoxLayout(orientation="vertical", spacing=10, padding=10)
-        
+
         # Dropdown to select graph
         self.spinner = Spinner(
             text="Select Graph",
-            values=("xG vs Starts", "xG vs Minutes", "xG vs gw","xG vs FPL cost", "Goals vs FPL cost", "Goals vs Starts", "Goals vs Minutes", "Goals vs gw"),
+            values=("clean sheets vs Minutes","Conceded vs team goals","xG vs Starts", "xG vs Minutes", "xG vs gw","xG vs FPL cost", "Goals vs FPL cost", "Goals vs Starts", "Goals vs Minutes", "Goals vs gw"),
             size_hint=(None, None),
             size=(200, 44),
             pos_hint={"center_x": 0.5}
         )
+
         self.spinner.bind(text=self.update_graph)
         layout.add_widget(self.spinner)
 
@@ -48,7 +50,15 @@ class GraphApp(App):
         return layout
 
     def update_graph(self, spinner, text):
-        if text == "xG vs Starts":
+        if text == "Conceded vs team goals":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("gw","goals_scored","goals_conceded")
+        elif text == "clean sheets vs Minutes":
+            if self.graph is not None:
+                plt.close(self.graph)
+            self.plot("minutes","clean_sheets","goals_scored")
+        elif text == "xG vs Starts":
             if self.graph is not None:
                 plt.close(self.graph)
             self.plot("starts","expected_goals_conceded","expected_goals")
@@ -94,13 +104,11 @@ class GraphApp(App):
             team_code = p["team_code"] # integer stored as string
             player_to_team[pid] = team_code
 
-
         # ============================================================
         # BUILD LOOKUP: team_code → team_name
         # ============================================================
 
         teamcode_to_name = {t["code"]: t["name"] for t in teams}
-
 
         # ============================================================
         # CALCULATE TEAM GOALS CONCEDED PER GAME (using gw)
@@ -177,10 +185,10 @@ class GraphApp(App):
             [t["gc90"] for t in team_conceded_sorted],
             color="tab:blue",
             alpha=0.6,
-            label="Team Goals Conceded per 90"
+            label=goalc
         )
 
-        ax1.set_ylabel("Goals Conceded per 90", fontsize=12)
+        ax1.set_ylabel(goalc+" per "+num, fontsize=12)
         ax1.set_xticks(team_x)
         ax1.set_xticklabels(
             [t["team"] for t in team_conceded_sorted],
@@ -188,7 +196,6 @@ class GraphApp(App):
             ha="right",
             fontsize=9
         )
-
 
         # --- LINE PLOT: Top 20 players SOT/Proxy ---
         ax2.plot(
@@ -210,19 +217,18 @@ class GraphApp(App):
                 rotation=30
             )
 
-        ax2.set_ylabel("SOT per Game (expected goals proxy)", fontsize=12)
+        ax2.set_ylabel(goal+" per "+num, fontsize=12)
 
         ax1.legend(loc="upper left")
         ax2.legend(loc="upper right")
 
-        plt.title("Premier League: Team Conceding Likelihood vs Top 20 Attacking Players", fontsize=16)
+        plt.title("Premier League: Stats vs Top 20 Attacking Players", fontsize=16)
         plt.grid(True, linestyle="--", alpha=0.35)
         plt.tight_layout()
         plt.savefig("current_graph.png")
         plt.close(self.graph)
         self.graph_image.source = "current_graph.png"
         self.graph_image.reload()
-
 
 if __name__ == "__main__":
     GraphApp().run()
